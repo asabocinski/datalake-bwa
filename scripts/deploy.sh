@@ -55,7 +55,11 @@ for f in docker-compose.traefik.yml docker-compose.lowmem.yml; do
 done
 
 public_ip="$(curl -4 -fsS --max-time 5 https://api.ipify.org 2>/dev/null || true)"
-dns_ip="$(getent ahostsv4 "$DOMAIN" | awk 'NR==1{print $1}' || true)"
+# /etc/hosts da Hostinger mapeia o hostname da VPS para 127.0.1.1: ignora loopback
+dns_ip="$(getent ahostsv4 "$DOMAIN" | awk '$1 !~ /^127\./ {print $1; exit}' || true)"
+if [ -z "$dns_ip" ] && command -v dig >/dev/null; then
+  dns_ip="$(dig +short A "$DOMAIN" @1.1.1.1 | tail -1 || true)"
+fi
 if [ -z "$dns_ip" ]; then
   warn "$DOMAIN não resolve. O Let's Encrypt (HTTP-01) vai falhar até o DNS apontar para a VPS."
 elif [ -n "$public_ip" ] && [ "$dns_ip" != "$public_ip" ]; then
