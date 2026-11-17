@@ -1,0 +1,42 @@
+# Overlay BWA: publica o Supabase atrás do Traefik que já roda na VPS Hostinger.
+#
+# O Traefik do template Hostinger roda com `network_mode: host`, provider docker
+# (`exposedbydefault=false`), entrypoints `web`/`websecure` e certresolver
+# `letsencrypt` (HTTP-01). Como ele está na rede do host, alcança o IP do
+# container direto na bridge do compose: não precisa de rede externa compartilhada.
+#
+# Só o gateway (Envoy, serviço `api-gw`) é exposto. Ele já roteia
+# /auth, /rest, /realtime, /storage, /functions, /graphql e o Studio ("/",
+# protegido por basic auth com DASHBOARD_USERNAME/DASHBOARD_PASSWORD).
+
+services:
+  api-gw:
+    # Remove o bind 0.0.0.0:8000 do upstream: todo tráfego entra pelo Traefik (443).
+    # Mantemos só um bind em loopback para health check local / túnel SSH.
+    ports: !override
+      - "127.0.0.1:${API_GW_HTTP_PORT:-8000}:8000/tcp"
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.supabase.rule: "Host(`${SUPABASE_DOMAIN:?defina SUPABASE_DOMAIN no .env}`)"
+      traefik.http.routers.supabase.entrypoints: "${TRAEFIK_ENTRYPOINT:-websecure}"
+      traefik.http.routers.supabase.tls: "true"
+      traefik.http.routers.supabase.tls.certresolver: "${TRAEFIK_CERTRESOLVER:-letsencrypt}"
+      traefik.http.routers.supabase.service: "supabase"
+      traefik.http.services.supabase.loadbalancer.server.port: "8000"
+      # Cabeçalhos de segurança básicos
+      traefik.http.routers.supabase.middlewares: "supabase-headers"
+      traefik.http.middlewares.supabase-headers.headers.stsSeconds: "31536000"
+      traefik.http.middlewares.supabase-headers.headers.stsIncludeSubdomains: "true"
+      traefik.http.middlewares.supabase-headers.headers.contentTypeNosniff: "true"
+      traefik.http.middlewares.supabase-headers.headers.referrerPolicy: "strict-origin-when-cross-origin"
+      # /mcp (MCP do Studio) não tem autenticação no self-hosted: bloqueado na
+      # borda para qualquer IP público, mesmo que o Envoy seja liberado para o
+      # túnel SSH (MCP_LOCAL_ENABLED=true, ver scripts/enable-mcp-local.py).
+      traefik.http.routers.supabase-mcp-block.rule: "Host(`${SUPABASE_DOMAIN}`) && (PathPrefix(`/mcp`) || PathPrefix(`/api/mcp`))"
+      traefik.http.routers.supabase-mcp-block.priority: "1000"
+      traefik.http.routers.supabase-mcp-block.entrypoints: "${TRAEFIK_ENTRYPOINT:-websecure}"
+      traefik.http.routers.supabase-mcp-block.tls: "true"
+      traefik.http.routers.supabase-mcp-block.tls.certresolver: "${TRAEFIK_CERTRESOLVER:-letsencrypt}"
+      traefik.http.routers.supabase-mcp-block.service: "supabase"
+      traefik.http.routers.supabase-mcp-block.middlewares: "supabase-mcp-deny"
+      traefik.http.middlewares.supabase-mcp-deny.ipallowlist.sourcerange: "127.0.0.1/32"
