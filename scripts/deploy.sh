@@ -54,6 +54,17 @@ for f in docker-compose.traefik.yml docker-compose.lowmem.yml; do
   fi
 done
 
+# MCP do Studio: libera /mcp no Envoy só para túnel local, ou mantém o bloqueio upstream
+LDS=volumes/api/envoy/lds.template.yaml
+lds_before="$(sha256sum "$LDS" | cut -d' ' -f1)"
+if [ "$(envget MCP_LOCAL_ENABLED)" = "true" ]; then
+  python3 "$REPO_DIR/scripts/enable-mcp-local.py" "$LDS"
+else
+  python3 "$REPO_DIR/scripts/enable-mcp-local.py" --revert "$LDS" >/dev/null
+fi
+LDS_CHANGED=0
+[ "$lds_before" = "$(sha256sum "$LDS" | cut -d' ' -f1)" ] || LDS_CHANGED=1
+
 public_ip="$(curl -4 -fsS --max-time 5 https://api.ipify.org 2>/dev/null || true)"
 # /etc/hosts da Hostinger mapeia o hostname da VPS para 127.0.1.1: ignora loopback
 dns_ip="$(getent ahostsv4 "$DOMAIN" | awk '$1 !~ /^127\./ {print $1; exit}' || true)"
@@ -94,6 +105,11 @@ log "subindo stack (aguardando health checks, até ${WAIT_TIMEOUT}s)"
 if ! docker compose up -d --remove-orphans --wait --wait-timeout "$WAIT_TIMEOUT"; then
   docker compose ps
   die "algum serviço não ficou saudável. Veja: docker compose logs --tail=100 <serviço>"
+fi
+if [ "$LDS_CHANGED" = "1" ]; then
+  log "config do Envoy mudou (MCP); reiniciando api-gw"
+  docker compose restart api-gw
+  docker compose up -d --wait --wait-timeout 120 api-gw
 fi
 docker compose ps
 

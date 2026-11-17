@@ -130,7 +130,33 @@ Ferramentas de ETL/BI que rodam fora da VPS devem usar túnel SSH (DBeaver, Airb
 Metabase e afins suportam). Se for preciso expor o Postgres publicamente, faça com
 allowlist de IP no firewall da Hostinger e TLS, nunca só trocando o bind para 0.0.0.0.
 
-## 5. Operação
+## 5. MCP do Supabase (Claude Code / Cursor)
+
+O Studio self-hosted traz um servidor MCP em `/mcp`, **sem autenticação**: quem alcança
+a rota roda SQL como `postgres`. Por isso ele nunca fica público:
+
+- **Traefik:** o router `supabase-mcp-block` devolve 403 para `/mcp` e `/api/mcp` vindos da internet (sempre ativo).
+- **Envoy:** o upstream bloqueia `/mcp` para todos. Com `MCP_LOCAL_ENABLED=true` no `.env`,
+  o `deploy.sh` aplica `scripts/enable-mcp-local.py`, que libera só conexões de rede privada
+  **sem** os headers que o Traefik injeta (`X-Real-Ip`, `X-Forwarded-Server`, `X-Forwarded-Host`),
+  ou seja, só o túnel SSH para `127.0.0.1:8000`. `MCP_LOCAL_ENABLED=false` reverte.
+
+Uso no Mac:
+
+```bash
+# túnel (porta local 54321 -> Envoy na VPS)
+ssh -i ~/.ssh/bwa_hostinger_ed25519 -fN -L 54321:127.0.0.1:8000 root@187.53.123.9
+
+# registrar no Claude Code (uma vez)
+claude mcp add --scope user --transport http supabase-bwa \
+  "http://localhost:54321/mcp?features=docs%2Cdatabase%2Cdebugging%2Cdevelopment"
+```
+
+Não há passo de "Authenticate": isso é do Supabase cloud. Sem o túnel aberto, o MCP só
+fica indisponível. Não dá para cadastrar esse MCP como conector no claude.ai sem expor
+o banco à internet.
+
+## 6. Operação
 
 ```bash
 cd /docker/supabase
@@ -149,7 +175,7 @@ cd /opt/datalake-bwa && git pull
 ./scripts/deploy.sh
 ```
 
-## 6. Backup e restore
+## 7. Backup e restore
 
 ```bash
 /opt/datalake-bwa/scripts/backup.sh                  # /var/backups/supabase, 7 dias
@@ -172,7 +198,7 @@ tar -C volumes -xzf /var/backups/supabase/storage-AAAAMMDD-HHMMSS.tar.gz
 /opt/datalake-bwa/scripts/deploy.sh --skip-pull
 ```
 
-## 7. Atualizar versão do Supabase
+## 8. Atualizar versão do Supabase
 
 1. Faça backup (`scripts/backup.sh`).
 2. Leia o `CHANGELOG.md` da nova tag `self-hosted/vX.Y.Z`.
@@ -181,7 +207,7 @@ tar -C volumes -xzf /var/backups/supabase/storage-AAAAMMDD-HHMMSS.tar.gz
 5. `/opt/datalake-bwa/scripts/deploy.sh`.
 6. Atualize `supabase/UPSTREAM_REF` neste repositório via PR.
 
-## 8. Troubleshooting
+## 9. Troubleshooting
 
 | Sintoma | Verificar |
 |---|---|
@@ -192,7 +218,7 @@ tar -C volumes -xzf /var/backups/supabase/storage-AAAAMMDD-HHMMSS.tar.gz
 | Studio sem logs | Esperado: Logflare desligado. |
 | Lentidão geral | 1 vCPU: evite queries analíticas pesadas no horário de ingestão; avalie upgrade para KVM 2. |
 
-## 9. Endurecimento (próximos passos sugeridos)
+## 10. Endurecimento (próximos passos sugeridos)
 
 - Restringir o Studio por IP (middleware `ipAllowList` do Traefik num router separado para `/`).
 - SMTP real (`SMTP_*` no `.env`) para convites e recuperação de senha.

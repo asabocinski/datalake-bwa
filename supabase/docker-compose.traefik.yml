@@ -29,3 +29,14 @@ services:
       traefik.http.middlewares.supabase-headers.headers.stsIncludeSubdomains: "true"
       traefik.http.middlewares.supabase-headers.headers.contentTypeNosniff: "true"
       traefik.http.middlewares.supabase-headers.headers.referrerPolicy: "strict-origin-when-cross-origin"
+      # /mcp (MCP do Studio) não tem autenticação no self-hosted: bloqueado na
+      # borda para qualquer IP público, mesmo que o Envoy seja liberado para o
+      # túnel SSH (MCP_LOCAL_ENABLED=true, ver scripts/enable-mcp-local.py).
+      traefik.http.routers.supabase-mcp-block.rule: "Host(`${SUPABASE_DOMAIN}`) && (PathPrefix(`/mcp`) || PathPrefix(`/api/mcp`))"
+      traefik.http.routers.supabase-mcp-block.priority: "1000"
+      traefik.http.routers.supabase-mcp-block.entrypoints: "${TRAEFIK_ENTRYPOINT:-websecure}"
+      traefik.http.routers.supabase-mcp-block.tls: "true"
+      traefik.http.routers.supabase-mcp-block.tls.certresolver: "${TRAEFIK_CERTRESOLVER:-letsencrypt}"
+      traefik.http.routers.supabase-mcp-block.service: "supabase"
+      traefik.http.routers.supabase-mcp-block.middlewares: "supabase-mcp-deny"
+      traefik.http.middlewares.supabase-mcp-deny.ipallowlist.sourcerange: "127.0.0.1/32"

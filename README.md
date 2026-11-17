@@ -21,6 +21,7 @@ o upstream: guarda só o que é nosso (overlays, `.env.example`, scripts e runbo
 | `scripts/generate-secrets.sh` | Gera o `.env` com segredos novos usando os utilitários oficiais |
 | `scripts/deploy.sh` | Pré-checagens, `pull`, `up --wait` e smoke test via HTTPS |
 | `scripts/backup.sh` | `pg_dumpall` + Storage com retenção |
+| `scripts/enable-mcp-local.py` | Libera o MCP do Studio só para túnel SSH (ativado por `MCP_LOCAL_ENABLED=true`) |
 | `docs/runbook.md` | Passo a passo de instalação, operação, backup, upgrade e troubleshooting |
 
 ## Resumo do deploy
