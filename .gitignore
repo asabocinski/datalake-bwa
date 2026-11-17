@@ -1,0 +1,9 @@
+# Segredos: nunca commitar
+.env
+.env.*
+!.env.example
+!supabase/.env.example
+*.bak.*
+# Backups locais
+*.sql.gz
+*.tar.gz

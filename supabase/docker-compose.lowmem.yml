@@ -1,0 +1,95 @@
+# Overlay BWA: perfil para VPS pequena (Hostinger KVM 1: 1 vCPU, 4 GB RAM).
+#
+# Usado junto com o override oficial docker-compose.pgbouncer.yml
+# (troca o Supavisor, em Elixir, ~250-400 MB, pelo PgBouncer, ~10 MB).
+#
+# O que este arquivo faz:
+#   - Remove o imgproxy (transformação de imagens não é caso de uso de data lake).
+#   - Liga as chaves assimétricas (ES256 + chaves opacas sb_publishable/sb_secret).
+#   - Ajusta o Postgres para ~4 GB de RAM e prende Postgres/PgBouncer em 127.0.0.1.
+#   - Coloca limites de memória nos serviços stateless para que um pico
+#     (Studio, Edge Functions) não leve o Postgres a um OOM kill.
+#
+# Logflare + Vector (docker-compose.logs.yml) ficam DESLIGADOS: só o Logflare
+# pede ~1 GB. Sem eles, a aba "Logs" do Studio fica vazia; use `docker compose logs`.
+
+services:
+  db:
+    # Acesso direto ao Postgres só por loopback (túnel SSH / ETL na própria VPS).
+    # Portas publicadas pelo Docker ignoram o UFW, por isso nunca 0.0.0.0 aqui.
+    ports:
+      - "127.0.0.1:${POSTGRES_DIRECT_PORT:-5432}:${POSTGRES_PORT}"
+    command:
+      - postgres
+      - -c
+      - config_file=/etc/postgresql/postgresql.conf
+      - -c
+      - log_min_messages=fatal
+      - -c
+      - shared_buffers=${PG_SHARED_BUFFERS:-768MB}
+      - -c
+      - effective_cache_size=${PG_EFFECTIVE_CACHE_SIZE:-2GB}
+      - -c
+      - work_mem=${PG_WORK_MEM:-16MB}
+      - -c
+      - maintenance_work_mem=${PG_MAINTENANCE_WORK_MEM:-256MB}
+      - -c
+      - max_connections=${PG_MAX_CONNECTIONS:-100}
+      - -c
+      - max_worker_processes=4
+      - -c
+      - max_parallel_workers=1
+      - -c
+      - max_parallel_workers_per_gather=1
+      - -c
+      - random_page_cost=1.1
+      - -c
+      - wal_compression=on
+    shm_size: 256m
+
+  pgbouncer:
+    # Upstream publica 0.0.0.0:6543. Aqui: só loopback.
+    ports: !override
+      - "127.0.0.1:${POOLER_PROXY_PORT_TRANSACTION}:6432"
+    mem_limit: 64m
+
+  imgproxy: !reset null
+
+  storage:
+    depends_on: !override
+      db:
+        condition: service_healthy
+      rest:
+        condition: service_started
+    environment:
+      ENABLE_IMAGE_TRANSFORMATION: "false"
+      IMGPROXY_URL: ""
+      JWT_JWKS: ${JWT_JWKS:?rode scripts/generate-secrets.sh}
+    mem_limit: 320m
+
+  auth:
+    environment:
+      GOTRUE_JWT_KEYS: ${JWT_KEYS:?rode scripts/generate-secrets.sh}
+    mem_limit: 128m
+
+  rest:
+    mem_limit: 192m
+
+  realtime:
+    environment:
+      API_JWT_JWKS: ${JWT_JWKS:?rode scripts/generate-secrets.sh}
+    mem_limit: 384m
+
+  functions:
+    environment:
+      SUPABASE_JWKS: ${JWT_JWKS:?rode scripts/generate-secrets.sh}
+    # mem_limit vem de FUNCTIONS_MEMORY_LIMIT no .env (upstream usa 2g; aqui 256m)
+
+  studio:
+    mem_limit: 640m
+
+  meta:
+    mem_limit: 192m
+
+  api-gw:
+    mem_limit: 128m
